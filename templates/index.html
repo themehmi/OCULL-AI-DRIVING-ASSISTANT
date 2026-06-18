@@ -415,6 +415,18 @@
             width: 100%;
         }
 
+        .stop-btn {
+            background: var(--danger);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 20px;
+            width: 100%;
+        }
+
         @media (max-width: 992px) {
             .main-container {
                 grid-template-columns: 1fr;
@@ -583,6 +595,7 @@
             </div>
 
             <button id="startAppBtn" class="start-btn">Start Camera & Microphone</button>
+            <button id="stopAppBtn" class="stop-btn" style="display: none;">Stop Camera & Microphone</button>
 
             <div class="status-box" id="statusContainer">
                 <div class="status-title">System Status</div>
@@ -707,6 +720,8 @@
         // --- Hardware APIs (Camera, Mic, Speakers) ---
         let isHardwareActive = false;
         let isSpeaking = false;
+        let cameraInterval = null;
+        let recognition = null;
 
 
         // --- NATIVE AUDIO API ---
@@ -781,6 +796,16 @@
             }
         }
 
+        // Pre-load voices on page load
+        let availableVoices = [];
+        function loadVoices() {
+            availableVoices = window.speechSynthesis.getVoices();
+        }
+        loadVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+
         // TTS Engine
         function speakOutLoud(text) {
             if (!text) return;
@@ -789,7 +814,7 @@
             const utterance = new SpeechSynthesisUtterance(cleanText);
 
             // Try to find a good voice
-            const voices = window.speechSynthesis.getVoices();
+            const voices = availableVoices.length > 0 ? availableVoices : window.speechSynthesis.getVoices();
             const preferredVoice = voices.find(v => v.name.includes('Zira') || v.name.includes('Female')) || voices[0];
             if (preferredVoice) {
                 utterance.voice = preferredVoice;
@@ -808,11 +833,10 @@
         function startListeningLoop() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                console.error("Speech Recognition API not supported in this browser.");
+                console.error("Speech recognition not supported.");
                 return;
             }
-
-            const recognition = new SpeechRecognition();
+            recognition = new SpeechRecognition();
             recognition.continuous = false;
             recognition.interimResults = false;
             recognition.lang = 'en-US';
@@ -914,7 +938,8 @@
             }
 
             // Loop every ~333ms (3 FPS)
-            setInterval(async () => {
+            if (cameraInterval) clearInterval(cameraInterval);
+            cameraInterval = setInterval(async () => {
                 if (!isHardwareActive) return;
 
                 if (video.videoWidth > 0) {
@@ -1013,11 +1038,47 @@
         document.getElementById('startAppBtn').addEventListener('click', () => {
             isHardwareActive = true;
             document.getElementById('startAppBtn').style.display = 'none';
+            document.getElementById('stopAppBtn').style.display = 'block';
             // Pre-load voices
             window.speechSynthesis.getVoices();
             startCameraLoop();
             startListeningLoop();
             speakOutLoud("System initialized. Camera and microphone active.");
+        });
+
+        // Stop Hardware
+        document.getElementById('stopAppBtn').addEventListener('click', () => {
+            isHardwareActive = false;
+            document.getElementById('stopAppBtn').style.display = 'none';
+            document.getElementById('startAppBtn').style.display = 'block';
+            
+            // Stop Video Tracks
+            const video = document.getElementById('videoElement');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            if (cameraInterval) {
+                clearInterval(cameraInterval);
+                cameraInterval = null;
+            }
+            
+            // Stop Audio Recognition
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch(e) {}
+            }
+            
+            // Clear Overlay
+            const overlay = document.getElementById('overlayCanvas');
+            if (overlay) {
+                const octx = overlay.getContext('2d');
+                octx.clearRect(0, 0, overlay.width, overlay.height);
+            }
+            
+            speakOutLoud("Hardware disconnected.");
         });
 
         // Manual Text Chat

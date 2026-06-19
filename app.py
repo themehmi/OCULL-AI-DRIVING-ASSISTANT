@@ -26,7 +26,8 @@ from openai import OpenAI
 import re
 from dotenv import load_dotenv
 import urllib.parse
-from curl_cffi import requests
+from ytmusicapi import YTMusic
+from curl_cffi import requests as cffi_requests
 import subprocess
 
 load_dotenv()
@@ -84,12 +85,19 @@ def api_music_url():
     if not video_id:
         return jsonify({"error": "No video_id provided"}), 400
     try:
-        cmd = ["yt-dlp", "-J", "-f", "bestaudio"]
+        cmd = ["yt-dlp", "-J", "-f", "bestaudio", "--force-ipv4"]
         if os.path.exists("cookies.txt"):
             cmd.extend(["--cookies", "cookies.txt"])
-        cmd.append(f"https://www.youtube.com/watch?v={video_id}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+        try:
+            # First attempt: With Chrome impersonation (solves bot detection on Hugging Face)
+            cmd_imp = cmd + ["--impersonate", "chrome", f"https://www.youtube.com/watch?v={video_id}"]
+            result = subprocess.run(cmd_imp, capture_output=True, text=True, check=True, timeout=10)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # Fallback: Without impersonation (solves local Windows error if curl_cffi is unsupported)
+            cmd_no_imp = cmd + [f"https://www.youtube.com/watch?v={video_id}"]
+            result = subprocess.run(cmd_no_imp, capture_output=True, text=True, check=True, timeout=10)
+            
         info = json.loads(result.stdout)
         return jsonify({
             "url": info.get("url"),
@@ -146,14 +154,14 @@ def api_frame():
                 else:
                     duration = time.time() - start_closed_time
                     
-                    # 3 s — first wake-up nudge
-                    if duration >= 3.0 and last_announced_state == "NORMAL":
+                    # 5s — first wake-up nudge
+                    if duration >= 5.0 and last_announced_state == "NORMAL":
                         system_status["state"] = "LEVEL_1"
                         alert_triggered = "Wake up! Please stay focused on the road."
                         last_announced_state = "LEVEL_1"
                     
-                    # 7 s — serious warning
-                    elif duration >= 7.0 and last_announced_state == "LEVEL_1":
+                    # 8s — serious warning
+                    elif duration >= 8.0 and last_announced_state == "LEVEL_1":
                         system_status["state"] = "LEVEL_3"
                         system_status["drowsy_counter"] += 1
                         last_announced_state = "LEVEL_3"
@@ -220,17 +228,31 @@ def api_voice():
         if len(stripped) > 1:
             set_dialogue('none')
             try:
-                cmd = ["yt-dlp", f"ytsearch10:{stripped} energetic", "--get-id", "--flat-playlist"]
-                if os.path.exists("cookies.txt"):
-                    cmd.extend(["--cookies", "cookies.txt"])
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                video_ids = [line.strip() for line in result.stdout.split('\n') if len(line.strip()) == 11]
+                try:
+                    # 113 is CurlOpt.IPRESOLVE, 1 is CURL_IPRESOLVE_V4. Forcing IPv4 prevents bot detection on HF IPv6
+                    session = cffi_requests.Session(impersonate="chrome", curl_options={113: 1}, timeout=10)
+                    ytmusic = YTMusic(requests_session=session)
+                except Exception:
+                    ytmusic = YTMusic()
+                results = ytmusic.search(f"{stripped} energetic lyrics", filter="videos", limit=10)
+                video_ids = [res['videoId'] for res in results if 'videoId' in res]
                 if video_ids:
                     return jsonify({"speak": f"Playing {stripped} to keep you alert.", "action": "play_native", "video_ids": video_ids[:20], "title": stripped})
                 else:
                     return jsonify({"speak": "I couldn't find that song."})
             except Exception as e:
                 print(f"[YouTube Search Error] {repr(e)}")
+                # Fallback to yt-dlp search if ytmusicapi is blocked
+                try:
+                    cmd = ["yt-dlp", "--impersonate", "chrome", "--force-ipv4", "--get-id", "--flat-playlist", f"ytsearch10:{stripped} energetic"]
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+                    ids = result.stdout.strip().split('\n')
+                    video_ids = [vid.strip() for vid in ids if len(vid.strip()) == 11]
+                    if video_ids:
+                         return jsonify({"speak": f"Playing {stripped} to keep you alert.", "action": "play_native", "video_ids": video_ids[:20], "title": stripped})
+                except Exception as ex:
+                    print(f"[Fallback Search Error] {repr(ex)}")
+                    
                 return jsonify({"speak": "I had trouble searching for the song on YouTube Music. It might be blocking automated requests."})
         return jsonify({})
 
@@ -283,17 +305,31 @@ def api_voice():
             return jsonify({"speak": "Skipping.", "action": "next_native"})
         if song:
             try:
-                cmd = ["yt-dlp", f"ytsearch10:{song}", "--get-id", "--flat-playlist"]
-                if os.path.exists("cookies.txt"):
-                    cmd.extend(["--cookies", "cookies.txt"])
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                video_ids = [line.strip() for line in result.stdout.split('\n') if len(line.strip()) == 11]
+                try:
+                    # 113 is CurlOpt.IPRESOLVE, 1 is CURL_IPRESOLVE_V4. Forcing IPv4 prevents bot detection on HF IPv6
+                    session = cffi_requests.Session(impersonate="chrome", curl_options={113: 1}, timeout=10)
+                    ytmusic = YTMusic(requests_session=session)
+                except Exception:
+                    ytmusic = YTMusic()
+                results = ytmusic.search(f"{song} lyrics", filter="videos", limit=10)
+                video_ids = [res['videoId'] for res in results if 'videoId' in res]
                 if video_ids:
                     return jsonify({"speak": f"Playing {song}.", "action": "play_native", "video_ids": video_ids[:20], "title": song})
                 else:
                     return jsonify({"speak": "I couldn't find that song."})
             except Exception as e:
                 print(f"[YouTube Search Error] {repr(e)}")
+                # Fallback to yt-dlp search if ytmusicapi is blocked
+                try:
+                    cmd = ["yt-dlp", "--impersonate", "chrome", "--force-ipv4", "--get-id", "--flat-playlist", f"ytsearch10:{song}"]
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+                    ids = result.stdout.strip().split('\n')
+                    video_ids = [vid.strip() for vid in ids if len(vid.strip()) == 11]
+                    if video_ids:
+                         return jsonify({"speak": f"Playing {song}.", "action": "play_native", "video_ids": video_ids[:20], "title": song})
+                except Exception as ex:
+                    print(f"[Fallback Search Error] {repr(ex)}")
+                
                 return jsonify({"speak": "I had trouble searching for the song on YouTube Music. It might be blocking automated requests."})
 
     # LLM Interaction

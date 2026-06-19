@@ -427,9 +427,17 @@
             width: 100%;
         }
 
+        @media (max-width: 1200px) {
+            .main-container {
+                gap: 1.5rem;
+                padding: 1.5rem;
+            }
+        }
+
         @media (max-width: 992px) {
             .main-container {
                 grid-template-columns: 1fr;
+                padding: 1.5rem;
             }
 
             .chat-area,
@@ -462,15 +470,17 @@
             }
             
             .tab-btn {
-                padding: 0.6rem 1rem;
-                font-size: 0.95rem;
+                padding: 0.6rem 0.8rem;
+                font-size: 0.9rem;
             }
         }
         
         @media (max-width: 480px) {
-            .chat-area,
+            .chat-area {
+                min-height: 300px;
+            }
             .video-wrapper {
-                min-height: 250px;
+                min-height: 200px;
             }
             
             .status-value {
@@ -479,6 +489,61 @@
             
             .navbar {
                 justify-content: center;
+                padding: 0.8rem 1rem;
+            }
+            
+            .navbar-brand {
+                font-size: 1.1rem;
+            }
+            
+            .chat-input-area {
+                flex-direction: column;
+            }
+            
+            .btn-glow {
+                padding: 0.8rem;
+            }
+            
+            .modern-media-player {
+                padding: 8px 10px;
+                gap: 8px;
+            }
+            
+            .mmp-art {
+                width: 40px;
+                height: 40px;
+            }
+            
+            .mmp-title {
+                font-size: 0.85rem;
+            }
+            
+            .mmp-artist {
+                font-size: 0.75rem;
+            }
+            
+            .mmp-controls {
+                margin-right: 5px;
+                gap: 6px;
+            }
+            
+            .mmp-btn {
+                font-size: 1rem;
+            }
+            
+            .mmp-btn.play-pause {
+                font-size: 1.2rem;
+            }
+        }
+        
+        @media (max-width: 360px) {
+            .tab-nav {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            .tab-btn {
+                text-align: center;
+                width: 100%;
             }
         }
         
@@ -653,8 +718,10 @@
 
 
 
-            <!-- NATIVE AUDIO PLAYER -->
-            <audio id="native-audio" style="display:none;"></audio>
+            <!-- YOUTUBE IFRAME PLAYER -->
+            <div id="ytplayer-container" style="position:fixed; top:-9999px; left:-9999px; width:300px; height:300px; opacity:0; pointer-events:none;">
+                <div id="ytplayer"></div>
+            </div>
 
             <!-- Chat Tab -->
             <div class="tab-content" id="chat-tab">
@@ -724,76 +791,109 @@
         let recognition = null;
 
 
-        // --- NATIVE AUDIO API ---
-        const nativeAudio = document.getElementById('native-audio');
+        // --- YOUTUBE IFRAME API ---
+        let ytPlayer = null;
+        let isYtPlayerReady = false;
         let isMmpPlaying = false;
 
-        nativeAudio.addEventListener('play', () => {
-            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-pause"></i>';
-            isMmpPlaying = true;
-        });
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
-        nativeAudio.addEventListener('pause', () => {
-            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-            isMmpPlaying = false;
-        });
+        window.onYouTubeIframeAPIReady = function() {
+            ytPlayer = new YT.Player('ytplayer', {
+                height: '300',
+                width: '300',
+                playerVars: {
+                    'autoplay': 1,
+                    'controls': 0,
+                    'showinfo': 0,
+                    'rel': 0,
+                    'modestbranding': 1,
+                    'playsinline': 1,
+                    'origin': window.location.origin
+                },
+                events: {
+                    'onReady': () => { isYtPlayerReady = true; },
+                    'onStateChange': onPlayerStateChange,
+                    'onError': onPlayerError
+                }
+            });
+        };
 
-        nativeAudio.addEventListener('ended', () => {
+        function onPlayerError(event) {
+            console.error("YouTube Player Error:", event.data);
+            document.getElementById('mmp-title').innerText = "Playback Blocked";
             document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-            isMmpPlaying = false;
-            if (currentQueue.length > currentQueueIndex + 1) {
-                currentQueueIndex++;
-                playNativeAudio(currentQueue[currentQueueIndex], "Up Next...");
+            appendMessage('assistant', "YouTube blocked playback. Please click the play button manually, or try another song.");
+        }
+
+        function onPlayerStateChange(event) {
+            if (event.data == YT.PlayerState.PLAYING) {
+                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-pause"></i>';
+                isMmpPlaying = true;
+                try {
+                    let data = ytPlayer.getVideoData();
+                    if (data && data.title) {
+                        document.getElementById('mmp-title').innerText = data.title;
+                        if (data.author) document.getElementById('mmp-artist').innerText = data.author;
+                    }
+                } catch(e) {}
+            } else if (event.data == YT.PlayerState.PAUSED) {
+                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+                isMmpPlaying = false;
+            } else if (event.data == YT.PlayerState.BUFFERING) {
+                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                isMmpPlaying = false;
+            } else if (event.data == YT.PlayerState.UNSTARTED || event.data == YT.PlayerState.CUED) {
+                // Force play if it gets stuck in unstarted/cued
+                ytPlayer.playVideo();
+            } else if (event.data == YT.PlayerState.ENDED) {
+                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+                isMmpPlaying = false;
+                if (currentQueue.length > currentQueueIndex + 1) {
+                    currentQueueIndex++;
+                    playYtAudio(currentQueue[currentQueueIndex], "Up Next...");
+                } else {
+                    document.getElementById('custom-media-player').style.display = 'none';
+                }
             }
-        });
+        }
 
         let currentQueue = [];
         let currentQueueIndex = 0;
         let currentExtractionId = 0;
 
         function toggleMmpPlay() {
+            if (!ytPlayer || !isYtPlayerReady) return;
             if (isMmpPlaying) {
-                nativeAudio.pause();
+                ytPlayer.pauseVideo();
             } else {
-                nativeAudio.play();
+                ytPlayer.playVideo();
             }
         }
 
-        async function playNativeAudio(videoId, titleGuess) {
+        function playYtAudio(videoId, titleGuess) {
             const extractionId = ++currentExtractionId;
-            try { nativeAudio.pause(); } catch(e) {}
+            if (ytPlayer && isYtPlayerReady) ytPlayer.pauseVideo();
             
             document.getElementById('custom-media-player').style.display = 'flex';
             document.getElementById('mmp-thumbnail').src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-            document.getElementById('mmp-title').innerText = "Extracting Stream...";
-            document.getElementById('mmp-artist').innerText = titleGuess || "Loading";
+            document.getElementById('mmp-title').innerText = "Starting Audio Stream...";
+            document.getElementById('mmp-artist').innerText = titleGuess || "YouTube Music";
             document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             
-            try {
-                const res = await fetch(`/api/music_url?video_id=${videoId}`);
-                const data = await res.json();
-                
-                // Abort if the user requested another song while this one was extracting
+            const attemptPlay = () => {
                 if (extractionId !== currentExtractionId) return;
-                
-                if (data.url) {
-                    nativeAudio.src = data.url;
-                    nativeAudio.volume = 1.0;
-                    nativeAudio.play();
-                    document.getElementById('mmp-title').innerText = data.title || titleGuess;
-                    document.getElementById('mmp-artist').innerText = data.artist || "yt-dlp Engine";
-                    if (data.thumbnail) {
-                        document.getElementById('mmp-thumbnail').src = data.thumbnail;
-                    }
+                if (ytPlayer && isYtPlayerReady) {
+                    ytPlayer.loadVideoById(videoId);
+                    ytPlayer.setVolume(100);
                 } else {
-                    document.getElementById('mmp-title').innerText = "Stream Failed";
-                    document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-xmark"></i>';
+                    setTimeout(attemptPlay, 500);
                 }
-            } catch (err) {
-                console.error("Audio fetch error:", err);
-                document.getElementById('mmp-title').innerText = "Network Error";
-                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-xmark"></i>';
-            }
+            };
+            attemptPlay();
         }
 
         // Pre-load voices on page load
@@ -809,6 +909,12 @@
         // TTS Engine
         function speakOutLoud(text) {
             if (!text) return;
+
+            // lower music volume
+            if (ytPlayer && isYtPlayerReady && isMmpPlaying) {
+                ytPlayer.setVolume(20);
+            }
+
             // Filter out markdown
             const cleanText = text.replace(/\*\*/g, '').replace(/\*/g, '');
             const utterance = new SpeechSynthesisUtterance(cleanText);
@@ -823,8 +929,17 @@
             utterance.rate = 1.1;
 
             utterance.onstart = () => { isSpeaking = true; };
-            utterance.onend = () => { isSpeaking = false; };
-            utterance.onerror = () => { isSpeaking = false; };
+            utterance.onend = () => { 
+                isSpeaking = false; 
+                // restore music volume
+                if (ytPlayer && isYtPlayerReady && isMmpPlaying) {
+                    ytPlayer.setVolume(100);
+                }
+            };
+            utterance.onerror = () => { 
+                isSpeaking = false; 
+                if (ytPlayer && isYtPlayerReady && isMmpPlaying) ytPlayer.setVolume(100);
+            };
 
             window.speechSynthesis.speak(utterance);
         }
@@ -861,37 +976,42 @@
                     if (data.action === "play_native" && data.video_ids && data.video_ids.length > 0) {
                         currentQueue = data.video_ids;
                         currentQueueIndex = 0;
-                        playNativeAudio(currentQueue[currentQueueIndex], data.title);
+                        playYtAudio(currentQueue[currentQueueIndex], data.title);
                     } else if (data.action === "pause_native") {
-                        nativeAudio.pause();
+                        if (ytPlayer && isYtPlayerReady) ytPlayer.pauseVideo();
                     } else if (data.action === "resume_native") {
-                        nativeAudio.play();
+                        if (ytPlayer && isYtPlayerReady) ytPlayer.playVideo();
                     } else if (data.action === "stop_native") {
-                        nativeAudio.pause();
-                        nativeAudio.currentTime = 0;
+                        if (ytPlayer && isYtPlayerReady) ytPlayer.pauseVideo();
                         document.getElementById('custom-media-player').style.display = 'none';
                     } else if (data.action === "next_native") {
                         if (currentQueue.length > currentQueueIndex + 1) {
                             currentQueueIndex++;
-                            playNativeAudio(currentQueue[currentQueueIndex], "Up Next...");
+                            playYtAudio(currentQueue[currentQueueIndex], "Up Next...");
                         } else {
                             appendMessage('assistant', "End of queue reached.");
                         }
                     } else if (data.action === "prev_native") {
                         if (currentQueueIndex > 0) {
                             currentQueueIndex--;
-                            playNativeAudio(currentQueue[currentQueueIndex], "Going Back...");
+                            playYtAudio(currentQueue[currentQueueIndex], "Going Back...");
                         } else {
                             appendMessage('assistant', "No previous song in queue.");
                         }
                     } else if (data.action === "vol_up_native") {
-                        nativeAudio.volume = Math.min(1.0, nativeAudio.volume + 0.2);
+                        if (ytPlayer && isYtPlayerReady) {
+                            let vol = ytPlayer.getVolume();
+                            ytPlayer.setVolume(Math.min(100, vol + 20));
+                        }
                     } else if (data.action === "vol_down_native") {
-                        nativeAudio.volume = Math.max(0.0, nativeAudio.volume - 0.2);
+                        if (ytPlayer && isYtPlayerReady) {
+                            let vol = ytPlayer.getVolume();
+                            ytPlayer.setVolume(Math.max(0, vol - 20));
+                        }
                     } else if (data.action === "mute_native") {
-                        nativeAudio.muted = true;
+                        if (ytPlayer && isYtPlayerReady) ytPlayer.mute();
                     } else if (data.action === "unmute_native") {
-                        nativeAudio.muted = false;
+                        if (ytPlayer && isYtPlayerReady) ytPlayer.unMute();
                     } else if (data.action === "open_url" && data.url) {
                         let newWin = window.open(data.url, "_blank");
                         if (!newWin || newWin.closed || typeof newWin.closed == 'undefined') {

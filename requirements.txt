@@ -10,3 +10,4 @@ setuptools
 curl-cffi
 yt-dlp
 httpx<0.28.0
+ytmusicapi

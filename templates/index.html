@@ -4,24 +4,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Safe Driving Assistant & Copilot</title>
+    <title>Ocull - AI Driving Assistant</title>
     <!-- Modern Font -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg-base: #0a0e17;
-            --glass-bg: rgba(255, 255, 255, 0.03);
-            --glass-border: rgba(255, 255, 255, 0.08);
-            --primary: #00f0ff;
-            --primary-glow: rgba(0, 240, 255, 0.4);
-            --secondary: #7000ff;
-            --success: #00e676;
+            --bg-base: #050505;
+            --glass-bg: rgba(255, 255, 255, 0.04);
+            --glass-border: rgba(255, 255, 255, 0.15);
+            --primary: #ffffff;
+            --primary-glow: rgba(255, 255, 255, 0.3);
+            --secondary: #666666;
+            --success: #00e676; /* Kept semantic colors visible for safety alerts */
             --warning: #ffb300;
             --danger: #ff1744;
-            --text-main: #f0f4f8;
-            --text-muted: #8b9bb4;
+            --text-main: #ffffff;
+            --text-muted: #9e9e9e;
         }
 
         * {
@@ -38,8 +38,8 @@
             overflow-x: hidden;
             display: flex;
             flex-direction: column;
-            background-image: radial-gradient(circle at 15% 50%, rgba(112, 0, 255, 0.08), transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(0, 240, 255, 0.08), transparent 25%);
+            background-image: radial-gradient(circle at 15% 50%, rgba(255, 255, 255, 0.03), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(255, 255, 255, 0.02), transparent 25%);
         }
 
         /* Custom Scrollbar */
@@ -52,12 +52,12 @@
         }
 
         ::-webkit-scrollbar-thumb {
-            background: var(--glass-border);
+            background: rgba(255, 255, 255, 0.3); /* Much more visible scrollbar */
             border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: var(--text-muted);
+            background: rgba(255, 255, 255, 0.5);
         }
 
         .navbar {
@@ -91,11 +91,11 @@
 
         .main-container {
             display: grid;
-            grid-template-columns: 320px 1fr;
+            grid-template-columns: 320px 1fr 350px;
             gap: 2rem;
             padding: 2rem 3rem;
             flex-grow: 1;
-            max-width: 1600px;
+            max-width: 1800px;
             margin: 0 auto;
             width: 100%;
         }
@@ -322,6 +322,48 @@
         }
 
         /* Chatbot */
+        .chat-fab {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            box-shadow: 0 5px 20px rgba(112, 0, 255, 0.5);
+            cursor: pointer;
+            z-index: 999;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.3s ease;
+        }
+
+        .chat-fab:hover {
+            transform: scale(1.1);
+        }
+
+        .chat-header-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: color 0.3s ease;
+            padding: 4px;
+        }
+
+        .chat-header-btn:hover {
+            color: var(--text-main);
+        }
+
+        .chat-header-btn.danger:hover {
+            color: var(--danger);
+        }
+
         .chat-area {
             flex-grow: 1;
             overflow-y: auto;
@@ -333,14 +375,15 @@
             border: 1px solid var(--glass-border);
             border-radius: 12px;
             background: rgba(0, 0, 0, 0.15);
+            max-height: calc(100vh - 300px);
         }
 
         .message {
-            max-width: 80%;
-            padding: 1rem 1.2rem;
+            max-width: 85%;
+            padding: 0.8rem 1rem;
             border-radius: 12px;
-            font-size: 0.95rem;
-            line-height: 1.5;
+            font-size: 0.85rem;
+            line-height: 1.4;
             animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
 
@@ -427,10 +470,25 @@
             width: 100%;
         }
 
-        @media (max-width: 1200px) {
+        @media (max-width: 1400px) {
             .main-container {
+                grid-template-columns: 280px 1fr 320px;
                 gap: 1.5rem;
                 padding: 1.5rem;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .main-container {
+                grid-template-columns: 1fr 1fr;
+                gap: 1.5rem;
+                padding: 1.5rem;
+            }
+            .main-container > aside:last-child {
+                grid-column: span 2;
+            }
+            .chat-area {
+                max-height: 400px;
             }
         }
 
@@ -439,10 +497,36 @@
                 grid-template-columns: 1fr;
                 padding: 1.5rem;
             }
-
-            .chat-area,
+            .chat-fab {
+                display: flex; /* Show FAB on mobile */
+            }
+            #copilotPanel {
+                position: fixed;
+                bottom: -120%; /* Hidden by default */
+                left: 0;
+                right: 0;
+                height: 80vh;
+                margin: 0;
+                border-radius: 24px 24px 0 0;
+                z-index: 1000;
+                background: rgba(15, 15, 15, 0.95); /* Less transparent for mobile */
+                backdrop-filter: blur(24px); /* Stronger blur */
+                -webkit-backdrop-filter: blur(24px);
+                transition: bottom 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+            }
+            #copilotPanel.open {
+                bottom: 0;
+            }
+            .chat-area {
+                min-height: 0; /* Override */
+                max-height: none; /* Let it fill the 80vh panel */
+            }
             .video-wrapper {
-                min-height: 400px;
+                min-height: 300px;
+            }
+            .mobile-close-btn {
+                display: block !important;
             }
         }
 
@@ -463,22 +547,12 @@
             .glass-panel {
                 padding: 1rem;
             }
-
-            .chat-area,
             .video-wrapper {
-                min-height: 300px;
-            }
-            
-            .tab-btn {
-                padding: 0.6rem 0.8rem;
-                font-size: 0.9rem;
+                min-height: 250px;
             }
         }
         
         @media (max-width: 480px) {
-            .chat-area {
-                min-height: 300px;
-            }
             .video-wrapper {
                 min-height: 200px;
             }
@@ -646,9 +720,25 @@
 <body>
 
     <nav class="navbar">
-        <div class="navbar-brand">
-            <i class="fa-solid fa-shield-halved"></i>
-            DriveGuard Copilot
+        <div style="display: flex; flex-direction: column;">
+            <div class="navbar-brand">
+                <i class="fa-solid fa-eye"></i>
+                Ocull
+            </div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; font-weight: 400; letter-spacing: 0.5px;">
+                Your intelligent AI-powered safe driving companion
+            </div>
+            <div style="font-size: 0.75rem; color: #666; margin-top: 4px; display: flex; gap: 10px; align-items: center;">
+                <span>&copy; 2026</span>
+                <span>•</span>
+                <a href="mailto:mnarinder003@gmail.com" style="color: var(--text-muted); text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='var(--text-muted)'">
+                    <i class="fa-solid fa-envelope"></i> mnarinder003@gmail.com
+                </a>
+                <span>•</span>
+                <a href="https://github.com/themehmi" target="_blank" style="color: var(--text-muted); text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='var(--text-muted)'">
+                    <i class="fa-brands fa-github"></i> themehmi
+                </a>
+            </div>
         </div>
     </nav>
 
@@ -697,72 +787,129 @@
         </aside>
 
         <!-- Main Content -->
-        <main class="glass-panel">
-            <div class="tab-nav">
-                <button class="tab-btn active" data-target="vision-tab">
-                    <i class="fa-solid fa-video"></i> Drive Guard
-                </button>
-                <button class="tab-btn" data-target="chat-tab">
-                    <i class="fa-solid fa-robot"></i> Copilot AI
-                </button>
+        <main class="glass-panel" style="display: flex; flex-direction: column;">
+            <div class="panel-header">
+                <i class="fa-solid fa-video"></i> Drive Guard Camera
             </div>
 
-            <!-- Vision Tab -->
-            <div class="tab-content active" id="vision-tab">
-                <div class="video-wrapper">
-                    <video id="videoElement" autoplay playsinline muted></video>
-                    <canvas id="overlayCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); pointer-events: none;"></canvas>
-                    <canvas id="canvasElement" style="display:none;"></canvas>
-                </div>
+            <div class="video-wrapper" style="flex-grow: 1; max-height: 80vh;">
+                <video id="videoElement" autoplay playsinline muted></video>
+                <canvas id="overlayCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); pointer-events: none;"></canvas>
+                <canvas id="canvasElement" style="display:none;"></canvas>
             </div>
 
+            <!-- NATIVE AUDIO PLAYER (Hidden) -->
+            <audio id="nativeAudio" style="display:none;"></audio>
+        </main>
 
-
-            <!-- YOUTUBE IFRAME PLAYER -->
-            <div id="ytplayer-container" style="position:fixed; top:-9999px; left:-9999px; width:300px; height:300px; opacity:0; pointer-events:none;">
-                <div id="ytplayer"></div>
-            </div>
-
-            <!-- Chat Tab -->
-            <div class="tab-content" id="chat-tab">
-                <div class="chat-area" id="chatHistory">
-                    <div class="message msg-assistant">
-                        <i class="fa-solid fa-robot" style="color: var(--primary); margin-right: 8px;"></i>
-                        System online. I am your Safe Driving Copilot. Ask me about driving rules, emergency protocols,
-                        or best practices.
-                    </div>
-                </div>
-                <div class="chat-input-area">
-                    <input type="text" id="chatInput" class="glass-input" placeholder="Ask a question..."
-                        style="flex-grow: 1;">
-                    <button class="btn-glow" id="sendBtn">
-                        <i class="fa-solid fa-paper-plane"></i>
+        <!-- Right Sidebar for Copilot -->
+        <aside id="copilotPanel" class="glass-panel" style="display: flex; flex-direction: column;">
+            <div class="panel-header" style="justify-content: space-between; margin-bottom: 0.5rem;">
+                <div><i class="fa-solid fa-robot"></i> Copilot AI</div>
+                <div style="display: flex; gap: 8px;">
+                    <button id="scrollToTopBtn" class="chat-header-btn" title="Scroll to Top">
+                        <i class="fa-solid fa-arrow-up"></i>
+                    </button>
+                    <button id="scrollToBottomBtn" class="chat-header-btn" title="Scroll to Bottom">
+                        <i class="fa-solid fa-arrow-down"></i>
+                    </button>
+                    <button id="clearChatBtn" class="chat-header-btn danger" title="Clear Chat">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                    <button id="closeChatBtn" class="chat-header-btn mobile-close-btn" style="display:none;" title="Close Chat">
+                        <i class="fa-solid fa-chevron-down"></i>
                     </button>
                 </div>
             </div>
-        </main>
+            
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Say hi to Lara, your virtual driving assistant. Ask her driving related questions or play music by saying "Lara".
+            </p>
+
+            <div class="chat-area" id="chatHistory" style="flex-grow: 1; min-height: 250px;">
+                <div class="message msg-assistant">
+                    <i class="fa-solid fa-robot" style="color: var(--primary); margin-right: 8px;"></i>
+                    System online. I am your Safe Driving Copilot. Ask me about driving rules, emergency protocols,
+                    or best practices.
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chatInput" class="glass-input" placeholder="Ask a question..."
+                    style="flex-grow: 1;">
+                <button class="btn-glow" id="sendBtn">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </aside>
     </div>
+
+    <!-- Chat FAB for Mobile -->
+    <button id="chatFab" class="chat-fab" title="Open Chat">
+        <i class="fa-solid fa-message"></i>
+    </button>
 
     <!-- No external iframe scripts needed -->
     <script>
-        // Tab Navigation
-        const tabBtns = document.querySelectorAll('.tab-btn');
-        const tabContents = document.querySelectorAll('.tab-content');
-
-        tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                tabBtns.forEach(b => b.classList.remove('active'));
-                tabContents.forEach(c => c.classList.remove('active'));
-
-                btn.classList.add('active');
-                document.getElementById(btn.dataset.target).classList.add('active');
-            });
-        });
+        // Tab Navigation removed
 
         // Chat UI Logic
         const chatHistory = document.getElementById('chatHistory');
         const chatInput = document.getElementById('chatInput');
         const sendBtn = document.getElementById('sendBtn');
+        const scrollToTopBtn = document.getElementById('scrollToTopBtn');
+        const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+        const clearChatBtn = document.getElementById('clearChatBtn');
+        const chatFab = document.getElementById('chatFab');
+        const copilotPanel = document.getElementById('copilotPanel');
+        const closeChatBtn = document.getElementById('closeChatBtn');
+
+        if(chatFab && copilotPanel) {
+            // Tap to open
+            chatFab.addEventListener('click', () => {
+                copilotPanel.classList.add('open');
+            });
+            // Swipe up to open
+            let startY = 0;
+            chatFab.addEventListener('touchstart', (e) => {
+                startY = e.touches[0].clientY;
+            }, {passive: true});
+            chatFab.addEventListener('touchend', (e) => {
+                let endY = e.changedTouches[0].clientY;
+                if(startY - endY > 20) { // Swipe up
+                    copilotPanel.classList.add('open');
+                }
+            }, {passive: true});
+        }
+        
+        if(closeChatBtn && copilotPanel) {
+            // Click to close
+            closeChatBtn.addEventListener('click', () => {
+                copilotPanel.classList.remove('open');
+            });
+            
+            // Swipe down on header to close
+            const panelHeader = copilotPanel.querySelector('.panel-header');
+            let pStartY = 0;
+            panelHeader.addEventListener('touchstart', (e) => {
+                pStartY = e.touches[0].clientY;
+            }, {passive: true});
+            panelHeader.addEventListener('touchend', (e) => {
+                let pEndY = e.changedTouches[0].clientY;
+                if(pEndY - pStartY > 30) { // Swipe down
+                    copilotPanel.classList.remove('open');
+                }
+            }, {passive: true});
+        }
+
+        scrollToTopBtn.addEventListener('click', () => {
+            chatHistory.innerHTML = `
+                <div class="message msg-assistant">
+                    <i class="fa-solid fa-robot" style="color: var(--primary); margin-right: 8px;"></i>
+                    System online. I am your Safe Driving Copilot. Ask me about driving rules, emergency protocols,
+                    or best practices.
+                </div>
+            `;
+        });
 
         function appendMessage(role, content, source = null) {
             const div = document.createElement('div');
@@ -791,109 +938,103 @@
         let recognition = null;
 
 
-        // --- YOUTUBE IFRAME API ---
-        let ytPlayer = null;
-        let isYtPlayerReady = false;
+        // --- NATIVE AUDIO PLAYER (Bypasses YouTube Restrictions) ---
+        const nativeAudio = document.getElementById('nativeAudio') || new Audio();
         let isMmpPlaying = false;
 
-        const tag = document.createElement('script');
-        tag.src = "https://www.youtube.com/iframe_api";
-        const firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        nativeAudio.addEventListener('play', () => {
+            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-pause"></i>';
+            isMmpPlaying = true;
+        });
 
-        window.onYouTubeIframeAPIReady = function() {
-            ytPlayer = new YT.Player('ytplayer', {
-                height: '300',
-                width: '300',
-                playerVars: {
-                    'autoplay': 1,
-                    'controls': 0,
-                    'showinfo': 0,
-                    'rel': 0,
-                    'modestbranding': 1,
-                    'playsinline': 1,
-                    'origin': window.location.origin
-                },
-                events: {
-                    'onReady': () => { isYtPlayerReady = true; },
-                    'onStateChange': onPlayerStateChange,
-                    'onError': onPlayerError
-                }
-            });
-        };
+        nativeAudio.addEventListener('playing', () => {
+            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-pause"></i>';
+            isMmpPlaying = true;
+        });
 
-        function onPlayerError(event) {
-            console.error("YouTube Player Error:", event.data);
-            document.getElementById('mmp-title').innerText = "Playback Blocked";
+        nativeAudio.addEventListener('pause', () => {
             document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-            appendMessage('assistant', "YouTube blocked playback. Please click the play button manually, or try another song.");
-        }
+            isMmpPlaying = false;
+        });
 
-        function onPlayerStateChange(event) {
-            if (event.data == YT.PlayerState.PLAYING) {
-                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-pause"></i>';
-                isMmpPlaying = true;
-                try {
-                    let data = ytPlayer.getVideoData();
-                    if (data && data.title) {
-                        document.getElementById('mmp-title').innerText = data.title;
-                        if (data.author) document.getElementById('mmp-artist').innerText = data.author;
-                    }
-                } catch(e) {}
-            } else if (event.data == YT.PlayerState.PAUSED) {
-                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-                isMmpPlaying = false;
-            } else if (event.data == YT.PlayerState.BUFFERING) {
-                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-                isMmpPlaying = false;
-            } else if (event.data == YT.PlayerState.UNSTARTED || event.data == YT.PlayerState.CUED) {
-                // Force play if it gets stuck in unstarted/cued
-                ytPlayer.playVideo();
-            } else if (event.data == YT.PlayerState.ENDED) {
-                document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
-                isMmpPlaying = false;
-                if (currentQueue.length > currentQueueIndex + 1) {
-                    currentQueueIndex++;
-                    playYtAudio(currentQueue[currentQueueIndex], "Up Next...");
-                } else {
-                    document.getElementById('custom-media-player').style.display = 'none';
-                }
+        nativeAudio.addEventListener('waiting', () => {
+            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            isMmpPlaying = false;
+        });
+
+        nativeAudio.addEventListener('ended', () => {
+            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+            isMmpPlaying = false;
+            if (currentQueue.length > currentQueueIndex + 1) {
+                currentQueueIndex++;
+                playNativeAudio(currentQueue[currentQueueIndex], "Up Next...");
+            } else {
+                document.getElementById('custom-media-player').style.display = 'none';
             }
-        }
+        });
+
+        nativeAudio.addEventListener('error', (e) => {
+            console.error("Native Audio Player Error:", e);
+            document.getElementById('mmp-title').innerText = "Playback Failed";
+            document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+            appendMessage('assistant', "Failed to load audio stream. Please try another song.");
+            isMmpPlaying = false;
+        });
 
         let currentQueue = [];
         let currentQueueIndex = 0;
         let currentExtractionId = 0;
 
         function toggleMmpPlay() {
-            if (!ytPlayer || !isYtPlayerReady) return;
             if (isMmpPlaying) {
-                ytPlayer.pauseVideo();
+                nativeAudio.pause();
             } else {
-                ytPlayer.playVideo();
+                if (nativeAudio.src) {
+                    nativeAudio.play().catch(e => console.error("Play error:", e));
+                }
             }
         }
 
-        function playYtAudio(videoId, titleGuess) {
+        async function playNativeAudio(videoId, titleGuess) {
             const extractionId = ++currentExtractionId;
-            if (ytPlayer && isYtPlayerReady) ytPlayer.pauseVideo();
+            nativeAudio.pause();
             
             document.getElementById('custom-media-player').style.display = 'flex';
             document.getElementById('mmp-thumbnail').src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-            document.getElementById('mmp-title').innerText = "Starting Audio Stream...";
+            document.getElementById('mmp-title').innerText = "Extracting Audio Stream...";
             document.getElementById('mmp-artist').innerText = titleGuess || "YouTube Music";
             document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             
-            const attemptPlay = () => {
-                if (extractionId !== currentExtractionId) return;
-                if (ytPlayer && isYtPlayerReady) {
-                    ytPlayer.loadVideoById(videoId);
-                    ytPlayer.setVolume(100);
+            try {
+                // Fetch direct audio stream URL from backend
+                const response = await fetch(`/api/music_url?video_id=${videoId}`);
+                const data = await response.json();
+                
+                if (extractionId !== currentExtractionId) return; // Superceded by another play
+                
+                if (data.url) {
+                    document.getElementById('mmp-title').innerText = data.title || titleGuess;
+                    document.getElementById('mmp-artist').innerText = data.artist || "YouTube Music";
+                    
+                    nativeAudio.src = data.url;
+                    nativeAudio.volume = 1.0;
+                    nativeAudio.play().catch(e => {
+                        console.error("Autoplay prevented:", e);
+                        document.getElementById('mmp-title').innerText = data.title || titleGuess;
+                        document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+                        appendMessage('assistant', "Please click the play button manually to start the song.");
+                    });
                 } else {
-                    setTimeout(attemptPlay, 500);
+                    throw new Error(data.error || "No URL returned");
                 }
-            };
-            attemptPlay();
+            } catch (err) {
+                console.error("Extraction error:", err);
+                if (extractionId === currentExtractionId) {
+                    document.getElementById('mmp-title').innerText = "Extraction Failed";
+                    document.getElementById('mmp-play-pause').innerHTML = '<i class="fa-solid fa-play"></i>';
+                    appendMessage('assistant', "Failed to extract audio stream for this song. Please try another one.");
+                }
+            }
         }
 
         // Pre-load voices on page load
@@ -911,8 +1052,8 @@
             if (!text) return;
 
             // lower music volume
-            if (ytPlayer && isYtPlayerReady && isMmpPlaying) {
-                ytPlayer.setVolume(20);
+            if (isMmpPlaying) {
+                nativeAudio.volume = 0.2;
             }
 
             // Filter out markdown
@@ -932,13 +1073,13 @@
             utterance.onend = () => { 
                 isSpeaking = false; 
                 // restore music volume
-                if (ytPlayer && isYtPlayerReady && isMmpPlaying) {
-                    ytPlayer.setVolume(100);
+                if (isMmpPlaying) {
+                    nativeAudio.volume = 1.0;
                 }
             };
             utterance.onerror = () => { 
                 isSpeaking = false; 
-                if (ytPlayer && isYtPlayerReady && isMmpPlaying) ytPlayer.setVolume(100);
+                if (isMmpPlaying) nativeAudio.volume = 1.0;
             };
 
             window.speechSynthesis.speak(utterance);
@@ -976,42 +1117,38 @@
                     if (data.action === "play_native" && data.video_ids && data.video_ids.length > 0) {
                         currentQueue = data.video_ids;
                         currentQueueIndex = 0;
-                        playYtAudio(currentQueue[currentQueueIndex], data.title);
+                        playNativeAudio(currentQueue[currentQueueIndex], data.title);
                     } else if (data.action === "pause_native") {
-                        if (ytPlayer && isYtPlayerReady) ytPlayer.pauseVideo();
+                        nativeAudio.pause();
                     } else if (data.action === "resume_native") {
-                        if (ytPlayer && isYtPlayerReady) ytPlayer.playVideo();
+                        nativeAudio.play();
                     } else if (data.action === "stop_native") {
-                        if (ytPlayer && isYtPlayerReady) ytPlayer.pauseVideo();
+                        nativeAudio.pause();
                         document.getElementById('custom-media-player').style.display = 'none';
                     } else if (data.action === "next_native") {
                         if (currentQueue.length > currentQueueIndex + 1) {
                             currentQueueIndex++;
-                            playYtAudio(currentQueue[currentQueueIndex], "Up Next...");
+                            playNativeAudio(currentQueue[currentQueueIndex], "Up Next...");
                         } else {
                             appendMessage('assistant', "End of queue reached.");
                         }
                     } else if (data.action === "prev_native") {
                         if (currentQueueIndex > 0) {
                             currentQueueIndex--;
-                            playYtAudio(currentQueue[currentQueueIndex], "Going Back...");
+                            playNativeAudio(currentQueue[currentQueueIndex], "Going Back...");
                         } else {
                             appendMessage('assistant', "No previous song in queue.");
                         }
                     } else if (data.action === "vol_up_native") {
-                        if (ytPlayer && isYtPlayerReady) {
-                            let vol = ytPlayer.getVolume();
-                            ytPlayer.setVolume(Math.min(100, vol + 20));
-                        }
+                        let vol = nativeAudio.volume;
+                        nativeAudio.volume = Math.min(1.0, vol + 0.2);
                     } else if (data.action === "vol_down_native") {
-                        if (ytPlayer && isYtPlayerReady) {
-                            let vol = ytPlayer.getVolume();
-                            ytPlayer.setVolume(Math.max(0, vol - 20));
-                        }
+                        let vol = nativeAudio.volume;
+                        nativeAudio.volume = Math.max(0.0, vol - 0.2);
                     } else if (data.action === "mute_native") {
-                        if (ytPlayer && isYtPlayerReady) ytPlayer.mute();
+                        nativeAudio.muted = true;
                     } else if (data.action === "unmute_native") {
-                        if (ytPlayer && isYtPlayerReady) ytPlayer.unMute();
+                        nativeAudio.muted = false;
                     } else if (data.action === "open_url" && data.url) {
                         let newWin = window.open(data.url, "_blank");
                         if (!newWin || newWin.closed || typeof newWin.closed == 'undefined') {

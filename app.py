@@ -19,8 +19,11 @@ import cv2
 import time
 import json
 import numpy as np
-import face_recognition
 import base64
+import urllib.request
+import mediapipe as mp 
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 import re
@@ -33,6 +36,28 @@ import subprocess
 load_dotenv()
 
 app = Flask(__name__)
+
+# MediaPipe Setup (New Tasks API, dynamically downloading the model if missing)
+MODEL_PATH = "face_landmarker.task"
+if not os.path.exists(MODEL_PATH):
+    print("Downloading MediaPipe Face Landmarker model...")
+    url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+    urllib.request.urlretrieve(url, MODEL_PATH)
+
+base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+options = vision.FaceLandmarkerOptions(
+    base_options=base_options,
+    output_face_blendshapes=False,
+    output_facial_transformation_matrixes=False,
+    num_faces=1,
+    min_face_detection_confidence=0.5,
+    min_face_presence_confidence=0.5,
+    min_tracking_confidence=0.5)
+
+face_mesh = vision.FaceLandmarker.create_from_options(options)
+# MediaPipe Eye Landmark Indices
+RIGHT_EYE = [33, 160, 158, 133, 153, 144] # User's right eye
+LEFT_EYE = [362, 385, 387, 263, 373, 380] # User's left eye
 
 # Global State
 system_status = {
@@ -52,25 +77,41 @@ def set_dialogue(state):
 def get_dialogue():
     return _dialogue_state
 
-# Voice State
+# Voice State & Tracking Variables
 active_listening = False
 start_closed_time = None
 last_announced_state = "NORMAL"
 
-# Face Tracking Logic
-EAR_THRESHOLD = 0.22
+# Adjusted EAR Threshold for MediaPipe (MediaPipe EAR tends to be slightly different than dlib)
+EAR_THRESHOLD = 0.20 
+smoothed_ear = 1.0  # For Exponential Moving Average
+EMA_ALPHA = 0.4     # Smoothing factor (Lower = smoother but slightly delayed)
 
-def eye_aspect_ratio(eye_points):
-    p1, p2, p3, p4, p5, p6 = [np.array(pt) for pt in eye_points]
-    v1 = np.linalg.norm(p2 - p6)
-    v2 = np.linalg.norm(p3 - p5)
-    h = np.linalg.norm(p1 - p4)
+def eye_aspect_ratio_mediapipe(landmarks, eye_indices, img_w, img_h):
+    # Convert normalized landmarks to pixel coordinates
+    pts = [np.array([landmarks[i].x * img_w, landmarks[i].y * img_h]) for i in eye_indices]
+    
+    # Compute EAR
+    v1 = np.linalg.norm(pts[1] - pts[5])
+    v2 = np.linalg.norm(pts[2] - pts[4])
+    h = np.linalg.norm(pts[0] - pts[3])
+    
     if h == 0: return 0.0
-    return (v1 + v2) / (2.0 * h)
+    return (v1 + v2) / (2.0 * h), pts
 
+def enhance_low_light(frame):
+    """ Applies CLAHE to improve contrast in dark environments """
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    
+    # Apply CLAHE to L-channel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    cl = clahe.apply(l)
+    
+    limg = cv2.merge((cl,a,b))
+    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
 
-# Flask Routes
-
+# FLASK ROUTES
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -111,7 +152,7 @@ def api_music_url():
 
 @app.route('/api/frame', methods=['POST'])
 def api_frame():
-    global start_closed_time, last_announced_state
+    global start_closed_time, last_announced_state, smoothed_ear
     
     data = request.json
     if not data or 'image' not in data:
@@ -122,66 +163,76 @@ def api_frame():
     np_arr = np.frombuffer(img_data, np.uint8)
     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     
+    # 1. Low Light Enhancement (CLAHE)
+    frame = enhance_low_light(frame)
+    
+    # 2. Process with MediaPipe
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    scale = 0.5
-    small_rgb = cv2.resize(rgb_frame, (0, 0), fx=scale, fy=scale)
+    img_h, img_w, _ = frame.shape
     
-    face_landmarks_list = face_recognition.face_landmarks(small_rgb)
-    avg_ear = 1.0
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+    results = face_mesh.detect(mp_image)
+    
+    avg_ear = smoothed_ear
     alert_triggered = None
+    left_eye_points_out = []
+    right_eye_points_out = []
     
-    left_eye_points = []
-    right_eye_points = []
-    
-    if face_landmarks_list:
-        landmarks = face_landmarks_list[0]
-        left_eye_raw = landmarks.get('left_eye', [])
-        right_eye_raw = landmarks.get('right_eye', [])
+    if results.face_landmarks:
+        landmarks = results.face_landmarks[0]
         
-        if len(left_eye_raw) == 6 and len(right_eye_raw) == 6:
-            left_eye_points = [(int(x/scale), int(y/scale)) for x, y in left_eye_raw]
-            right_eye_points = [(int(x/scale), int(y/scale)) for x, y in right_eye_raw]
-            
-            left_ear = eye_aspect_ratio(left_eye_points)
-            right_ear = eye_aspect_ratio(right_eye_points)
-            avg_ear = (left_ear + right_ear) / 2.0
-            
-            system_status["ear"] = avg_ear
-            
-            if avg_ear < EAR_THRESHOLD:
-                if start_closed_time is None:
-                    start_closed_time = time.time()
-                else:
-                    duration = time.time() - start_closed_time
-                    
-                    # 5s — first wake-up nudge
-                    if duration >= 5.0 and last_announced_state == "NORMAL":
-                        system_status["state"] = "LEVEL_1"
-                        alert_triggered = "Wake up! Please stay focused on the road."
-                        last_announced_state = "LEVEL_1"
-                    
-                    # 8s — serious warning
-                    elif duration >= 8.0 and last_announced_state == "LEVEL_1":
-                        system_status["state"] = "LEVEL_3"
-                        system_status["drowsy_counter"] += 1
-                        last_announced_state = "LEVEL_3"
-                        
-                        if system_status["drowsy_counter"] >= 3 and get_dialogue() == 'none':
-                            set_dialogue('asking_rest')
-                            alert_triggered = "You have been drowsy multiple times. I strongly recommend you take a rest or have an energy drink. Should I remind you to pull over? Say yes or no."
-                        else:
-                            alert_triggered = "Please pull over safely and take a rest."
+        # Calculate EAR
+        right_ear, right_eye_pts = eye_aspect_ratio_mediapipe(landmarks, RIGHT_EYE, img_w, img_h)
+        left_ear, left_eye_pts = eye_aspect_ratio_mediapipe(landmarks, LEFT_EYE, img_w, img_h)
+        
+        raw_avg_ear = (left_ear + right_ear) / 2.0
+        
+        # 3. Signal Smoothing (EMA) to combat low camera resolution jitters
+        smoothed_ear = (EMA_ALPHA * raw_avg_ear) + ((1 - EMA_ALPHA) * smoothed_ear)
+        avg_ear = smoothed_ear
+        system_status["ear"] = avg_ear
+        
+        # Formatting for frontend drawing (if needed)
+        left_eye_points_out = [(int(pt[0]), int(pt[1])) for pt in left_eye_pts]
+        right_eye_points_out = [(int(pt[0]), int(pt[1])) for pt in right_eye_pts]
+        
+        # Alert Logic
+        if avg_ear < EAR_THRESHOLD:
+            if start_closed_time is None:
+                start_closed_time = time.time()
             else:
-                start_closed_time = None
-                if system_status["state"] != "NORMAL":
-                    system_status["state"] = "NORMAL"
-                    last_announced_state = "NORMAL"
+                duration = time.time() - start_closed_time
+                
+                # 5s — first wake-up nudge
+                if duration >= 5.0 and last_announced_state == "NORMAL":
+                    system_status["state"] = "LEVEL_1"
+                    alert_triggered = "Wake up! Please stay focused on the road."
+                    last_announced_state = "LEVEL_1"
+                
+                # 8s — serious warning
+                elif duration >= 8.0 and last_announced_state == "LEVEL_1":
+                    system_status["state"] = "LEVEL_3"
+                    system_status["drowsy_counter"] += 1
+                    last_announced_state = "LEVEL_3"
+                    
+                    if system_status["drowsy_counter"] >= 3 and get_dialogue() == 'none':
+                        set_dialogue('asking_rest')
+                        alert_triggered = "You have been drowsy multiple times. I strongly recommend you take a rest or have an energy drink. Should I remind you to pull over? Say yes or no."
+                    else:
+                        alert_triggered = "Please pull over safely and take a rest."
+        else:
+            start_closed_time = None
+            if system_status["state"] != "NORMAL":
+                system_status["state"] = "NORMAL"
+                last_announced_state = "NORMAL"
     else:
         # No face detected
         start_closed_time = None
         if system_status["state"] != "NORMAL":
             system_status["state"] = "NORMAL"
             last_announced_state = "NORMAL"
+
+    # Contact emergency if no dialogue response
     action = None
     if _dialogue_state in ['asking_rest', 'asking_song']:
         if time.time() - _dialogue_start_time > 15.0:
@@ -196,8 +247,8 @@ def api_frame():
         "drowsy_counter": system_status["drowsy_counter"],
         "alert": alert_triggered,
         "action": action,
-        "left_eye": left_eye_points,
-        "right_eye": right_eye_points
+        "left_eye": left_eye_points_out,
+        "right_eye": right_eye_points_out
     })
 
 @app.route('/api/voice', methods=['POST'])

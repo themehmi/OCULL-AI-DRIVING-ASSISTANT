@@ -434,9 +434,12 @@ def api_voice():
 
     # Normal wake-word logic
     clean_text = re.sub(r'[^\w\s]', '', text).strip()
-    if 'thanks lara' in clean_text or 'thank you lara' in clean_text or (active_listening and clean_text in ['thanks', 'thank you']):
+    if 'lara thanks' in clean_text or 'lara thank you' in clean_text:
         active_listening = False
-        return jsonify({})
+        return jsonify({"speak": "You're welcome."})
+    elif active_listening and clean_text in ['thanks', 'thank you']:
+        active_listening = False
+        return jsonify({"speak": "You're welcome."})
         
     command = ""
     if active_listening:

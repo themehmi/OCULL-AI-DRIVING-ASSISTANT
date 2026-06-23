@@ -245,7 +245,7 @@ def api_music_url():
         return jsonify({"error": "No video_id provided"}), 400
     try:
         url = f"https://www.youtube.com/watch?v={video_id}"
-        yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
+        yt = YouTube(url, 'WEB', use_oauth=False, allow_oauth_cache=False)
         audio_stream = yt.streams.get_audio_only()
         
         return jsonify({

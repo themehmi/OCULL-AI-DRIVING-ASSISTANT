@@ -9,12 +9,16 @@ ENV PYTHONUNBUFFERED=1 \
 # Set the working directory inside the container
 WORKDIR /app
 
-# Install system dependencies (build tools for dlib/face_recognition)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    cmake \
-    g++ \
-    git \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libgles2 \
+    libegl1 \
     nodejs \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,5 +35,5 @@ COPY . .
 # Expose the default Hugging Face Spaces port
 EXPOSE 7860
 
-# Run the application using Gunicorn for production scalability
-CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "1", "--threads", "8", "--timeout", "120", "app:app"]
+# Run the application using standard Python to avoid Gunicorn/MediaPipe C++ threading deadlocks on Hugging Face
+CMD ["python", "app.py"]

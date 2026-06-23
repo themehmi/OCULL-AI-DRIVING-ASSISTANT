@@ -24,18 +24,52 @@ import urllib.request
 import mediapipe as mp 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from flask import Flask, render_template, request, jsonify
+from pymongo import MongoClient
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from openai import OpenAI
 import re
 from dotenv import load_dotenv
 import urllib.parse
 from ytmusicapi import YTMusic
 from curl_cffi import requests as cffi_requests
-import subprocess
+import requests
+import socket
+from pytubefix import YouTube
+import urllib3.util.connection as urllib3_cn
+
+def allowed_gai_family():
+    return socket.AF_INET
+urllib3_cn.allowed_gai_family = allowed_gai_family
+
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY')
+
+# Fix for Hugging Face Spaces iframe and HTTPS
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SAMESITE='None'
+)
+
+# MongoDB Connection
+def get_db():
+    client = MongoClient(os.getenv("MONGO_URI"))
+    return client.safedriving
+
+# Login Required Decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # MediaPipe Setup (New Tasks API, dynamically downloading the model if missing)
 MODEL_PATH = "face_landmarker.task"
@@ -112,7 +146,91 @@ def enhance_low_light(frame):
     return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
 
 # FLASK ROUTES
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        confirm_password = request.form.get('confirm_password', '')
+        
+        if len(password) < 8:
+            flash('Password must be at least 8 characters long.', 'danger')
+            return render_template('signup.html')
+            
+        if password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return render_template('signup.html')
+        
+        db = get_db()
+        users = db.users
+        
+        if users.find_one({'username': username}):
+            flash('Username already exists.', 'danger')
+        else:
+            users.insert_one({
+                'username': username,
+                'password': generate_password_hash(password)
+            })
+            flash('Account created successfully! Please log in.', 'success')
+            return redirect(url_for('login'))
+            
+    return render_template('signup.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        db = get_db()
+        users = db.users
+        user = users.find_one({'username': username})
+        
+        if user and check_password_hash(user['password'], password):
+            session['user_id'] = str(user['_id'])
+            session['username'] = username
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password.', 'danger')
+            
+    return render_template('login.html')
+
+@app.route('/reset_password', methods=['GET', 'POST'])
+def reset_password():
+    if request.method == 'POST':
+        username = request.form['username']
+        new_password = request.form['new_password']
+        
+        if len(new_password) < 8:
+            flash('Password must be at least 8 characters long.', 'danger')
+            return render_template('reset_password.html')
+            
+        db = get_db()
+        users = db.users
+        
+        user = users.find_one({'username': username})
+        if user:
+            users.update_one({'username': username}, {'$set': {'password': generate_password_hash(new_password)}})
+            flash('Password reset successfully! Please log in.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash('Username not found.', 'danger')
+            
+    return render_template('reset_password.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('user_id', None)
+    session.pop('username', None)
+    return redirect(url_for('login'))
+
+@app.route('/settings')
+@login_required
+def settings():
+    return render_template('settings.html')
+
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
@@ -126,28 +244,18 @@ def api_music_url():
     if not video_id:
         return jsonify({"error": "No video_id provided"}), 400
     try:
-        cmd = ["yt-dlp", "-J", "-f", "bestaudio", "--force-ipv4"]
-        if os.path.exists("cookies.txt"):
-            cmd.extend(["--cookies", "cookies.txt"])
-            
-        try:
-            # First attempt: With Chrome impersonation (solves bot detection on Hugging Face)
-            cmd_imp = cmd + ["--impersonate", "chrome", f"https://www.youtube.com/watch?v={video_id}"]
-            result = subprocess.run(cmd_imp, capture_output=True, text=True, check=True, timeout=10)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            # Fallback: Without impersonation (solves local Windows error if curl_cffi is unsupported)
-            cmd_no_imp = cmd + [f"https://www.youtube.com/watch?v={video_id}"]
-            result = subprocess.run(cmd_no_imp, capture_output=True, text=True, check=True, timeout=10)
-            
-        info = json.loads(result.stdout)
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
+        audio_stream = yt.streams.get_audio_only()
+        
         return jsonify({
-            "url": info.get("url"),
-            "title": info.get("title"),
-            "artist": info.get("uploader"),
-            "thumbnail": info.get("thumbnail")
+            "url": audio_stream.url,
+            "title": yt.title,
+            "artist": yt.author,
+            "thumbnail": yt.thumbnail_url
         })
     except Exception as e:
-        print(f"[yt-dlp error] {repr(e)}")
+        print(f"[pytubefix error] {repr(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/frame', methods=['POST'])
@@ -279,12 +387,28 @@ def api_voice():
         if len(stripped) > 1:
             set_dialogue('none')
             try:
+                user_id = session.get('user_id')
+                user = None
+                if user_id:
+                    from bson.objectid import ObjectId
+                    user = get_db().users.find_one({'_id': ObjectId(user_id)})
+                    
                 try:
-                    # 113 is CurlOpt.IPRESOLVE, 1 is CURL_IPRESOLVE_V4. Forcing IPv4 prevents bot detection on HF IPv6
-                    session = cffi_requests.Session(impersonate="chrome", curl_options={113: 1}, timeout=10)
-                    ytmusic = YTMusic(requests_session=session)
+                    if user and user.get('oauth_token'):
+                        filepath = f"oauth_{user_id}.json"
+                        with open(filepath, 'w') as f:
+                            f.write(user['oauth_token'])
+                        ytmusic = YTMusic(filepath)
+                        # Read back in case of refresh
+                        with open(filepath, 'r') as f:
+                            refreshed = f.read()
+                        if refreshed != user['oauth_token']:
+                            get_db().users.update_one({'_id': ObjectId(user_id)}, {'$set': {'oauth_token': refreshed}})
+                    else:
+                        ytmusic = YTMusic()
                 except Exception:
                     ytmusic = YTMusic()
+                    
                 results = ytmusic.search(f"{stripped} energetic lyrics", filter="videos", limit=10)
                 video_ids = [res['videoId'] for res in results if 'videoId' in res]
                 if video_ids:
@@ -295,7 +419,8 @@ def api_voice():
                 print(f"[YouTube Search Error] {repr(e)}")
                 # Fallback to yt-dlp search if ytmusicapi is blocked
                 try:
-                    cmd = ["yt-dlp", "--impersonate", "chrome", "--force-ipv4", "--get-id", "--flat-playlist", f"ytsearch10:{stripped} energetic"]
+                    cmd = ["yt-dlp", "--impersonate", "chrome", "--force-ipv4", "--get-id", "--flat-playlist"]
+                    cmd.append(f"ytsearch10:{stripped} energetic")
                     result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
                     ids = result.stdout.strip().split('\n')
                     video_ids = [vid.strip() for vid in ids if len(vid.strip()) == 11]
@@ -308,9 +433,14 @@ def api_voice():
         return jsonify({})
 
     # Normal wake-word logic
+    clean_text = re.sub(r'[^\w\s]', '', text).strip()
+    if 'thanks lara' in clean_text or 'thank you lara' in clean_text or (active_listening and clean_text in ['thanks', 'thank you']):
+        active_listening = False
+        return jsonify({})
+        
     command = ""
     if active_listening:
-        command = re.sub(r'[^\w\s]', '', text).strip()
+        command = clean_text
         if command in ['okay bye', 'ok bye', 'bye', 'goodbye', 'stop listening']:
             active_listening = False
             return jsonify({"speak": "Goodbye."})
@@ -356,12 +486,11 @@ def api_voice():
             return jsonify({"speak": "Skipping.", "action": "next_native"})
         if song:
             try:
-                try:
-                    # 113 is CurlOpt.IPRESOLVE, 1 is CURL_IPRESOLVE_V4. Forcing IPv4 prevents bot detection on HF IPv6
-                    session = cffi_requests.Session(impersonate="chrome", curl_options={113: 1}, timeout=10)
-                    ytmusic = YTMusic(requests_session=session)
-                except Exception:
-                    ytmusic = YTMusic()
+                # Inject a Chrome-impersonated session to bypass YouTube bot blocking on Hugging Face Spaces
+                custom_session = cffi_requests.Session(impersonate="chrome")
+                ytmusic = YTMusic(requests_session=custom_session)
+                
+                # Generic search
                 results = ytmusic.search(f"{song} lyrics", filter="videos", limit=10)
                 video_ids = [res['videoId'] for res in results if 'videoId' in res]
                 if video_ids:
@@ -370,17 +499,6 @@ def api_voice():
                     return jsonify({"speak": "I couldn't find that song."})
             except Exception as e:
                 print(f"[YouTube Search Error] {repr(e)}")
-                # Fallback to yt-dlp search if ytmusicapi is blocked
-                try:
-                    cmd = ["yt-dlp", "--impersonate", "chrome", "--force-ipv4", "--get-id", "--flat-playlist", f"ytsearch10:{song}"]
-                    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
-                    ids = result.stdout.strip().split('\n')
-                    video_ids = [vid.strip() for vid in ids if len(vid.strip()) == 11]
-                    if video_ids:
-                         return jsonify({"speak": f"Playing {song}.", "action": "play_native", "video_ids": video_ids[:20], "title": song})
-                except Exception as ex:
-                    print(f"[Fallback Search Error] {repr(ex)}")
-                
                 return jsonify({"speak": "I had trouble searching for the song on YouTube Music. It might be blocking automated requests."})
 
     # LLM Interaction

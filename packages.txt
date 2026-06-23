@@ -1,0 +1,7 @@
+ffmpeg
+libgl1
+libglib2.0-0
+libsm6
+libxext6
+libgles2
+libegl1

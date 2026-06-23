@@ -280,12 +280,14 @@ def api_proxy_audio():
     if not target_url:
         return "No URL provided", 400
         
-    headers = {}
+    headers = {
+        'User-Agent': request.headers.get('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+    }
     if request.headers.get('Range'):
         headers['Range'] = request.headers.get('Range')
         
     try:
-        # We impersonate chrome here just in case YouTube blocks standard requests
+        # Pass User-Agent to avoid YouTube returning 403 for python-requests
         req = requests.get(target_url, headers=headers, stream=True, timeout=10)
         
         resp_headers = {}

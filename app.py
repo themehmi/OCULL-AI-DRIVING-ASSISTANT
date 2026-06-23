@@ -245,18 +245,61 @@ def api_music_url():
         return jsonify({"error": "No video_id provided"}), 400
     try:
         url = f"https://www.youtube.com/watch?v={video_id}"
-        yt = YouTube(url, 'WEB', use_oauth=False, allow_oauth_cache=False)
+        # ANDROID_MUSIC client is less likely to trigger bot detection than WEB
+        yt = YouTube(url, 'ANDROID_MUSIC', use_oauth=False, allow_oauth_cache=False)
         audio_stream = yt.streams.get_audio_only()
         
         return jsonify({
-            "url": audio_stream.url,
+            "url": f"/api/proxy_audio?url={urllib.parse.quote(audio_stream.url)}",
             "title": yt.title,
             "artist": yt.author,
             "thumbnail": yt.thumbnail_url
         })
     except Exception as e:
         print(f"[pytubefix error] {repr(e)}")
+        # Fallback to yt-dlp if pytubefix fails
+        try:
+            import subprocess
+            cmd = ["yt-dlp", "--impersonate", "chrome", "--force-ipv4", "--get-url", "-f", "bestaudio", url]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=15)
+            audio_url = result.stdout.strip()
+            if audio_url:
+                return jsonify({
+                    "url": f"/api/proxy_audio?url={urllib.parse.quote(audio_url)}",
+                    "title": "YouTube Audio",
+                    "artist": "yt-dlp fallback",
+                    "thumbnail": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+                })
+        except Exception as ex:
+            print(f"[yt-dlp fallback error] {repr(ex)}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/proxy_audio')
+def api_proxy_audio():
+    target_url = request.args.get('url')
+    if not target_url:
+        return "No URL provided", 400
+        
+    headers = {}
+    if request.headers.get('Range'):
+        headers['Range'] = request.headers.get('Range')
+        
+    try:
+        # We impersonate chrome here just in case YouTube blocks standard requests
+        req = requests.get(target_url, headers=headers, stream=True, timeout=10)
+        
+        resp_headers = {}
+        for k, v in req.headers.items():
+            if k.lower() in ['content-type', 'content-length', 'content-range', 'accept-ranges']:
+                resp_headers[k] = v
+                
+        return app.response_class(
+            req.iter_content(chunk_size=8192),
+            status=req.status_code,
+            headers=resp_headers
+        )
+    except Exception as e:
+        return str(e), 500
 
 @app.route('/api/frame', methods=['POST'])
 def api_frame():

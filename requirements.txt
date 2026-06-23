@@ -12,3 +12,4 @@ ytmusicapi
 pymongo
 requests
 pytubefix
+yt-dlp

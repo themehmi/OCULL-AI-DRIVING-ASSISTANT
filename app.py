@@ -390,27 +390,7 @@ def api_voice():
         if len(stripped) > 1:
             set_dialogue('none')
             try:
-                user_id = session.get('user_id')
-                user = None
-                if user_id:
-                    from bson.objectid import ObjectId
-                    user = get_db().users.find_one({'_id': ObjectId(user_id)})
-                    
-                try:
-                    if user and user.get('oauth_token'):
-                        filepath = f"oauth_{user_id}.json"
-                        with open(filepath, 'w') as f:
-                            f.write(user['oauth_token'])
-                        ytmusic = YTMusic(filepath)
-                        # Read back in case of refresh
-                        with open(filepath, 'r') as f:
-                            refreshed = f.read()
-                        if refreshed != user['oauth_token']:
-                            get_db().users.update_one({'_id': ObjectId(user_id)}, {'$set': {'oauth_token': refreshed}})
-                    else:
-                        ytmusic = YTMusic()
-                except Exception:
-                    ytmusic = YTMusic()
+                ytmusic = YTMusic()
                     
                 results = ytmusic.search(f"{stripped} energetic lyrics", filter="videos", limit=10)
                 video_ids = [res['videoId'] for res in results if 'videoId' in res]
